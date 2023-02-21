@@ -1,0 +1,7 @@
+[package]
+name = "testlib"
+version = "0.1.0"
+edition = "2021"
+authors = ["kiwiyou@kiwiyou.dev"]
+
+[dependencies]
