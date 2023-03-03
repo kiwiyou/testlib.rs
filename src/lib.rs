@@ -8,6 +8,37 @@ use std::{
     str::FromStr,
 };
 
+#[repr(i32)]
+pub enum Verdict {
+    Ok = 0,
+    Wrong = 1,
+    Presentation = 2,
+    Fail = 3,
+}
+
+impl Verdict {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Wrong => "wrong answer",
+            Self::Presentation => "wrong output format",
+            Self::Fail => "FAIL",
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! quit {
+    ($verdict:ident, $($t:tt)*) => {{
+        use std::io::*;
+        let mut lock = std::io::stderr().lock();
+        lock.write_fmt(format_args!("{} ", self::Verdict::$verdict.name())).ok();
+        lock.write_fmt(format_args!($($t)*)).ok();
+        lock.write(self::EOLN.as_bytes()).ok();
+        std::process::exit(self::Verdict::$verdict as i32);
+    }};
+}
+
 const BUF: usize = 1 << 17;
 /// Validator for [`std::io::Read`].
 pub struct Validator<R> {
@@ -70,13 +101,21 @@ impl<R: Read> Validator<R> {
             }
         }
         if s.is_empty() {
-            panic!("{name}: expected integer, found EOF");
+            quit!(
+                Fail,
+                "Expected integer {name}, found EOF (line {})",
+                self.line
+            );
         }
         // Safety guarantee: s only contains b'-' and b'0'..=b'9'.
         let s = unsafe { String::from_utf8_unchecked(s) };
         match s.parse() {
             Ok(v) if range.contains(&v) => v,
-            _ => panic!("{name}: expected integer in bound {range:?}, found {s:?}"),
+            _ => quit!(
+                Fail,
+                "Expected integer {name} in bound {range:?}, found {s:?} (line {})",
+                self.line
+            ),
         }
     }
     /// Read integers separated by space, panics if not found or out of range.
@@ -105,10 +144,11 @@ impl<R: Read> Validator<R> {
     pub fn read_space(&mut self) {
         let ch = self.read_byte();
         if ch != Some(b' ') {
-            panic!(
-                "[LINE #{}] expected space, found {:?}",
+            quit!(
+                Fail,
+                "Expected space, found {:?} (line {})",
+                ch.map(|b| b as char),
                 self.line,
-                ch.map(|b| b as char)
             );
         }
         self.front += 1;
@@ -123,11 +163,19 @@ impl<R: Read> Validator<R> {
             s.push(ch);
         }
         if s.is_empty() {
-            panic!("{name}: expected string, found EOF");
+            quit!(
+                Fail,
+                "Expected string {name}, found EOF (line {})",
+                self.line
+            );
         }
         match String::from_utf8(s) {
             Ok(s) => s,
-            Err(_) => panic!("{name}: invalid utf-8 string"),
+            Err(_) => quit!(
+                Fail,
+                "Expected utf-8 string {name}, found invalid byte sequence (line {})",
+                self.line
+            ),
         }
     }
     /// Reads a line, panics if not found or invalid utf-8.
@@ -140,11 +188,19 @@ impl<R: Read> Validator<R> {
             s.push(ch);
         }
         if s.is_empty() {
-            panic!("{name}: expected string, found EOF");
+            quit!(
+                Fail,
+                "Expected string {name}, found EOF (line {})",
+                self.line
+            );
         }
         match String::from_utf8(s) {
             Ok(s) => s,
-            Err(_) => panic!("{name}: invalid utf-8 string"),
+            Err(_) => quit!(
+                Fail,
+                "Expected utf-8 string {name}, found invalid byte sequence (line {})",
+                self.line
+            ),
         }
     }
     /// Checks for newline `"\n"` ad `"\r\n"`, panics if not found.
@@ -156,7 +212,7 @@ impl<R: Read> Validator<R> {
                     self.front += 1;
                     self.line += 1;
                 } else {
-                    panic!("[LINE #{}] expected EOLN, found {:?}", self.line, '\r');
+                    quit!(Fail, "Expected EOLN, found '\\r' (line {})", self.line);
                 }
             }
             Some(b'\n') => {
@@ -164,12 +220,14 @@ impl<R: Read> Validator<R> {
                 self.line += 1;
             }
             None => {
-                panic!("[LINE #{}] expected EOLN, found EOF", self.line);
+                quit!(Fail, "Expected EOLN, found EOF (line {})", self.line);
             }
             Some(other) => {
-                panic!(
-                    "[LINE #{}] expected EOLN, found {:?}",
-                    self.line, other as char
+                quit!(
+                    Fail,
+                    "Expected EOLN, found {:?} (line {})",
+                    other as char,
+                    self.line
                 );
             }
         }
@@ -177,7 +235,12 @@ impl<R: Read> Validator<R> {
     /// Checks for EOF, panics if not found.
     pub fn read_eof(&mut self) {
         if let Some(ch) = self.read_byte() {
-            panic!("[LINE #{}] expected EOF, found {:?}", self.line, ch as char);
+            quit!(
+                Fail,
+                "Expected EOF, found {:?} (line {})",
+                ch as char,
+                self.line
+            );
         }
     }
     /// Skip whitespaces and check if it reached EOF.
@@ -275,16 +338,25 @@ impl Rng {
             Bound::Included(&min) => min,
             Bound::Excluded(&min) if min < u64::MAX => min + 1,
             Bound::Unbounded => 0,
-            _ => panic!("No matching integers in bound {range:?}"),
+            _ => quit!(
+                Fail,
+                "Expected an integer bound containing one or more integers, found {range:?}"
+            ),
         };
         let max = match range.end_bound() {
             Bound::Included(&max) => max,
             Bound::Excluded(&max) if max > u64::MIN => max - 1,
             Bound::Unbounded => u64::MAX,
-            _ => panic!("No matching integers in bound {range:?}"),
+            _ => quit!(
+                Fail,
+                "Expected an integer bound containing one or more integers, found {range:?}"
+            ),
         };
         if min > max {
-            panic!("No matching integers in bound {range:?}");
+            quit!(
+                Fail,
+                "Expected an integer bound containing one or more integers, found {range:?}"
+            );
         }
         let len = max - min + 1;
         let next = (self.next_u64() as u128 * len as u128) >> 64;
@@ -308,16 +380,25 @@ impl Rng {
             Bound::Included(&min) => min,
             Bound::Excluded(&min) if min < u64::MAX => min + 1,
             Bound::Unbounded => 0,
-            _ => panic!("No matching integers in bound {range:?}"),
+            _ => quit!(
+                Fail,
+                "Expected an integer bound containing one or more integers, found {range:?}"
+            ),
         };
         let max = match range.end_bound() {
             Bound::Included(&max) => max,
             Bound::Excluded(&max) if max > u64::MIN => max - 1,
             Bound::Unbounded => u64::MAX,
-            _ => panic!("No matching integers in bound {range:?}"),
+            _ => quit!(
+                Fail,
+                "Expected an integer bound containing one or more integers, found {range:?}"
+            ),
         };
         if min > max {
-            panic!("No matching integers in bound {range:?}");
+            quit!(
+                Fail,
+                "Expected an integer bound containing one or more integers, found {range:?}"
+            );
         }
         if w.abs() < 25 {
             let mut r = self.next_range::<&Bounds, Bounds>(range);
