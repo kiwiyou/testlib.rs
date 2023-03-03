@@ -79,6 +79,28 @@ impl<R: Read> Validator<R> {
             _ => panic!("{name}: expected integer in bound {range:?}, found {s:?}"),
         }
     }
+    /// Read integers separated by space, panics if not found or out of range.
+    pub fn read_ints<
+        Int: FromStr + PartialOrd,
+        Range: Borrow<Bounds>,
+        Bounds: RangeBounds<Int> + Debug,
+    >(
+        &mut self,
+        n: usize,
+        range: Range,
+        name: &str,
+    ) -> Vec<Int> {
+        let range = range.borrow();
+        let mut out = Vec::with_capacity(n);
+        for i in 1..=n {
+            let v = self.read_int::<Int, &Bounds, Bounds>(&range, &format!("{name}[{i}]"));
+            out.push(v);
+            if i != n {
+                self.read_space();
+            }
+        }
+        out
+    }
     /// Reads a space, panics if not found.
     pub fn read_space(&mut self) {
         let ch = self.read_byte();

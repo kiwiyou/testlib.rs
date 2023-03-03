@@ -8,6 +8,7 @@ The original testlib is documented quite bad, so testlib.rs leverages rustdoc.
 
 - arguments (indexed, named)
 - pseudo random number generator
+- input stream validator
 
 # Usage in Polygon
 
