@@ -1,6 +1,7 @@
 use std::{
     borrow::Borrow,
     collections::hash_map::DefaultHasher,
+    f32::consts::E,
     fmt::Debug,
     hash::{Hash, Hasher},
     io::Read,
@@ -430,8 +431,6 @@ impl Rng {
     }
 }
 
-/*
-WORKING IN PROGRESS
 /// Small regex subset.
 ///
 /// Supported syntax:
@@ -442,37 +441,206 @@ WORKING IN PROGRESS
 /// - any times (`*`)
 /// - one or more times (`+`)
 /// - grouping (`()`)
+#[derive(Debug)]
 pub enum Regex {
-    Raw(String),
+    Raw(char),
     Question(Vec<Regex>),
     Range(Vec<(char, char)>),
     Count(Vec<Regex>, usize, usize),
     Any,
     Star(Vec<Regex>),
     Plus(Vec<Regex>),
+    Group(Vec<Regex>),
 }
 
 impl FromStr for Regex {
     type Err = &'static str;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut stack = vec![];
-        let mut escaping = false;
-        enum State {
-            Raw(String),
-            RangeBegin,
-            RangeElement(Vec<(char, char)>,
-        }
-        let mut state = State::Raw;
-        for c in s.chars() {
-            if escaping {
-                match &mut state {
-                    State::Raw(buf) => buf.push(c),
-                }
-            }
-            match (&mut state, c) {
-
-            }
+        let (span, group) = parse_group(s)?;
+        if span == s.len() {
+            Ok(Regex::Group(group))
+        } else {
+            Err("unexpected `)`.")
         }
     }
 }
-*/
+
+fn parse_group(mut s: &str) -> Result<(usize, Vec<Regex>), &'static str> {
+    let mut stage = vec![];
+    let mut iter = s.char_indices();
+    let mut escaping = false;
+    let mut span = 0;
+    while let Some((i, c)) = iter.next() {
+        match c {
+            '(' if !escaping => {
+                span += i + 1;
+                let (gspan, group) = parse_group(&s[i + 1..])?;
+                span += gspan + 1;
+                s = &s[span..];
+                stage.push(Regex::Group(group));
+                iter = s.char_indices();
+            }
+            ')' if !escaping => {
+                span += i;
+                return Ok((span, stage));
+            }
+            '\\' if !escaping => {
+                escaping = true;
+            }
+            '[' if !escaping => {
+                span += i;
+                let (rspan, range) = parse_range(&s[span..])?;
+                span += rspan;
+                s = &s[span..];
+                iter = s.char_indices();
+                stage.push(Regex::Range(range));
+            }
+            ']' if !escaping => {
+                return Err("unexpected `]`.");
+            }
+            '{' if !escaping => {
+                span += i;
+                let (cspan, count) = parse_count(&s[span..])?;
+                span += cspan;
+                s = &s[span..];
+                iter = s.char_indices();
+                let last = stage.pop().ok_or("expected group or char.")?;
+                match last {
+                    Regex::Group(g) => {
+                        stage.push(Regex::Count(g, count.0, count.1));
+                    }
+                    r @ (Regex::Raw(_) | Regex::Any) => {
+                        stage.push(Regex::Count(vec![r], count.0, count.1));
+                    }
+                    _ => {
+                        return Err("expected group or char.");
+                    }
+                }
+            }
+            '}' if !escaping => return Err("unexpected `}`."),
+            '.' if !escaping => {
+                stage.push(Regex::Any);
+            }
+            '*' if !escaping => {
+                let last = stage.pop().ok_or("expected group or char.")?;
+                match last {
+                    Regex::Group(g) => {
+                        stage.push(Regex::Star(g));
+                    }
+                    r @ (Regex::Raw(_) | Regex::Any) => {
+                        stage.push(Regex::Star(vec![r]));
+                    }
+                    _ => {
+                        return Err("expected group or char.");
+                    }
+                }
+            }
+            '+' if !escaping => {
+                let last = stage.pop().ok_or("expected group or char.")?;
+                match last {
+                    Regex::Group(g) => {
+                        stage.push(Regex::Plus(g));
+                    }
+                    r @ (Regex::Raw(_) | Regex::Any) => {
+                        stage.push(Regex::Plus(vec![r]));
+                    }
+                    _ => {
+                        return Err("expected group or char.");
+                    }
+                }
+            }
+            '?' if !escaping => {
+                let last = stage.pop().ok_or("expected group or char.")?;
+                match last {
+                    Regex::Group(g) => {
+                        stage.push(Regex::Question(g));
+                    }
+                    r @ (Regex::Raw(_) | Regex::Any | Regex::Plus(_)) => {
+                        stage.push(Regex::Question(vec![r]));
+                    }
+                    _ => {
+                        return Err("expected group or char.");
+                    }
+                }
+            }
+            _ => {
+                stage.push(Regex::Raw(c));
+                escaping = false;
+            }
+        }
+    }
+    span += s.len();
+    Ok((span, stage))
+}
+
+fn parse_range(s: &str) -> Result<(usize, Vec<(char, char)>), &'static str> {
+    let Some((leading, s)) = s.split_once('[') else {
+        return Err("expected `[`.");
+    };
+    if !leading.is_empty() {
+        return Err("expected `[`.");
+    }
+    let mut escaping = false;
+    let mut ranges = vec![];
+    let mut expect_second = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            ']' if !escaping => {
+                if expect_second {
+                    return Err("expected char, found `]`.");
+                }
+                // (i + 1) + 1 (length of '[')
+                return Ok((i + 2, ranges));
+            }
+            '\\' if !escaping => {
+                escaping = true;
+            }
+            '-' if !escaping => {
+                expect_second = true;
+            }
+            _ if expect_second => {
+                let Some(last) = ranges.last_mut() else {
+                    return Err("expected char, found `-`.");
+                };
+                last.1 = c;
+                escaping = false;
+                expect_second = false;
+            }
+            _ => {
+                ranges.push((c, c));
+                escaping = false;
+            }
+        }
+    }
+    Err("expected `]`.")
+}
+
+fn parse_count(s: &str) -> Result<(usize, (usize, usize)), &'static str> {
+    let Some((leading, s)) = s.split_once('{') else {
+        return Err("expected `{`.");
+    };
+    if !leading.is_empty() {
+        return Err("expected `{`.");
+    }
+    let Some((s, _)) = s.split_once('}') else {
+        return Err("expected `}`.");
+    };
+    let span = s.len() + 2;
+    let count = if let Some((low, high)) = s.split_once(',') {
+        let low = if low.is_empty() {
+            0
+        } else {
+            low.parse::<usize>().ok().ok_or("expected number.")?
+        };
+        let high = if high.is_empty() {
+            usize::MAX
+        } else {
+            high.parse::<usize>().ok().ok_or("expected number.")?
+        };
+        (low, high)
+    } else {
+        let exact = s.parse::<usize>().ok().ok_or("expected number.")?;
+        (exact, exact)
+    };
+    Ok((span, count))
+}
