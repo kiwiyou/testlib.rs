@@ -1,7 +1,6 @@
 use std::{
     borrow::Borrow,
     collections::hash_map::DefaultHasher,
-    f32::consts::E,
     fmt::Debug,
     hash::{Hash, Hasher},
     io::Read,
@@ -9,15 +8,21 @@ use std::{
     str::FromStr,
 };
 
+/// Verdict. Quit status.
 #[repr(i32)]
 pub enum Verdict {
+    /// Accepted.
     Ok = 0,
+    /// Wrong Answer.
     Wrong = 1,
+    /// Presentation Error.
     Presentation = 2,
+    /// Crashed.
     Fail = 3,
 }
 
 impl Verdict {
+    /// Returns the name of verdict.
     pub fn name(&self) -> &'static str {
         match self {
             Self::Ok => "ok",
@@ -28,6 +33,7 @@ impl Verdict {
     }
 }
 
+/// Quit process with verdict and optional formattted messages.
 #[macro_export]
 macro_rules! quit {
     ($verdict:ident, $($t:tt)*) => {{
@@ -260,8 +266,10 @@ impl<R: Read> Validator<R> {
     }
 }
 
+/// End of line character depending on platforms.
 #[cfg(windows)]
 pub const EOLN: &str = "\r\n";
+/// End of line character depending on platforms.
 #[cfg(not(windows))]
 pub const EOLN: &str = "\n";
 
@@ -423,6 +431,7 @@ impl Rng {
             (p * len).min(len).max(0.0) as u64
         }
     }
+    /// Random shuffle a slice with Fisher-Yates algorithm.
     pub fn shuffle<T>(&mut self, arr: &mut [T]) {
         for i in 0..arr.len() {
             let j = self.next_range(i as u64..arr.len() as u64) as usize;

@@ -11,7 +11,7 @@ The original testlib is documented quite bad, so testlib.rs leverages rustdoc.
 - input stream validator
 - quit with status
 
-# Usage in Polygon
+# How to use in Polygon
 
 Add `src/lib.rs` to `Resources` as `testlib.rs`, and put `mod testlib` in your source.
 
@@ -22,3 +22,8 @@ Add `src/lib.rs` to `Resources` as `testlib.rs`, and put `mod testlib` in your s
 Validator written in `testlib.h` rejects `\n` line endings as EOLN.
 
 Use `testlib::EOLN` to print EOLN.
+
+# How to read docs
+
+Run `cargo doc`, then open `target/doc/testlib/index.html`.
+
